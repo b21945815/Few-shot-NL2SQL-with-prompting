@@ -7,11 +7,14 @@
 
 
 ## dataset
-To reproduce the results reported in the paper, please download the Spider dataset from the link below and create a data directory containing the tables.json and dev.json files.
+INSTALL THE DATA FROM https://bird-bench.github.io
+IN YOUR PROJECT UNZIP THE DATA TO A FOLDER NAMED DATA
+DATA
+ --dev_20240627
+ --train
 
-```
-$ Spider dataset = "https://drive.google.com/uc?export=download&id=1TqleXec_OykOYFREKKtschzY29dUcVAQ"
-```
+make .env file
+set OPENAI_API_KEY=key
 
 
 ## setup
@@ -20,7 +23,7 @@ To run this project, use the following commands:
 ```
 $ pip3 install -r requirements.txt
 $ echo "Start running DIN-SQL.py"
-$ python3 DIN-SQL.py --dataset ./data/ --output predicted_sql.txt
+$ python3 DIN-SQL_BIRD.py 
 $ echo "Finished running DIN-SQL.py"
 ```
 ## citation 

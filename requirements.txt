@@ -43,3 +43,6 @@ typing_extensions==4.5.0
 urllib3==1.26.14
 xxhash==3.2.0
 yarl==1.8.2
+langchain==0.0.339
+SQLAlchemy==1.4.52
+python-dotenv==1.2.1

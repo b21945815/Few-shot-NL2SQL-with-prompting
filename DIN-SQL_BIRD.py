@@ -3,7 +3,8 @@ import re
 import pandas as pd
 import json
 import glob
-
+import time
+from dotenv import load_dotenv
 from typing import List, Tuple
 from langchain.sql_database import SQLDatabase
 from langchain.chat_models import ChatOpenAI
@@ -16,12 +17,14 @@ from langchain.prompts import (
 
 
 # CHANGE THIS TO YOUR OPENAI API KEY
-
-os.environ["OPENAI_API_KEY"] = ""
-CHAT = ChatOpenAI(model="gpt-4-32k",temperature=0,max_tokens=2000)
-dev_db_path = "dev/dev_databases"
-dev_df = pd.read_json("dev/dev.json")
-
+load_dotenv()
+os.environ["OPENAI_API_KEY"] = api_key=os.getenv("OPENAI_API_KEY")
+CHAT = ChatOpenAI(model="gpt-4o",temperature=0,max_tokens=2000)
+dev_db_path = "data/dev_20240627/dev_databases"
+df_main = pd.read_json("data/dev_20240627/dev.json")
+df_append = pd.read_json("data/dev_20240627/dev_tied_append.json")
+dev_df = pd.concat([df_main, df_append], ignore_index=True)
+dev_df = dev_df[dev_df['db_id'] == 'financial'].reset_index(drop=True)
 # ----------------------- #
 
 SYSTEM_SCHEMA_LINKING_TEMPLATE = """
@@ -1141,14 +1144,27 @@ def extract_label_and_sub_questions(input_text: str) -> Tuple[str, List[str]]:
     return label, sub_questions
 
 def extract_sql_query(input_text):
-    sql_pattern = r'SQL:\s*(.*?)$'
-    match = re.search(sql_pattern, input_text, re.DOTALL)
-    return match.group(1).strip() if match else None
+    if not input_text:
+        return None
 
-def extract_revised_sql_query(input_text):
-    sql_pattern = r'Revised_SQL:\s*(.*?)$'
-    match = re.search(sql_pattern, input_text, re.DOTALL)
-    return match.group(1).strip() if match else None
+    code_block_pattern = r'```sql\s*(.*?)\s*```'
+    match = re.search(code_block_pattern, input_text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+
+    generic_block_pattern = r'```\s*(.*?)\s*```'
+    match_generic = re.search(generic_block_pattern, input_text, re.DOTALL)
+    if match_generic:
+        return match_generic.group(1).strip()
+
+    prefix_pattern = r'(?:SQL|Revised_SQL):\s*(.*?)$'
+    match_prefix = re.search(prefix_pattern, input_text, re.DOTALL | re.IGNORECASE)
+    if match_prefix:
+        clean_content = match_prefix.group(1).replace("```sql", "").replace("```", "").strip()
+        explanation_split = re.split(r'\n\s*Explanation:', clean_content, flags=re.IGNORECASE)
+        return explanation_split[0].strip()
+
+    return input_text.strip()
 
 def update_json_file(json_filename, index, sql_query, db_id):
     try:
@@ -1217,7 +1233,22 @@ if __name__ == "__main__":
     human_correction_prompt = HumanMessagePromptTemplate.from_template(HUMAN_SELF_CORRECTION_PROMPT) # noqa: E501
     correction_prompt = ChatPromptTemplate.from_messages([system_correction_prompt, human_correction_prompt]) # noqa: E501
     accuracy = 0
+
+    processed_indices = set()
+    output_file = "predict_dev.json"
+    
+    if os.path.exists(output_file):
+        try:
+            with open(output_file, 'r') as f:
+                existing_data = json.load(f)
+                processed_indices = {int(k) for k in existing_data.keys()}
+            print(f"Skipping {len(processed_indices)}")
+        except Exception as e:
+            print(f"JSON Error: {e}")
     for index,row in dev_df.iterrows():
+        if index in processed_indices:
+            print(f"Skipping index {index} (Already processed)")
+            continue
         if index < start_index:
             continue
         print("Processing row: ", index)
@@ -1242,6 +1273,10 @@ if __name__ == "__main__":
             schema_links=schema_links)
         label, sub_questions = extract_label_and_sub_questions(classification)
         print("Label: ", label)
+        if (label == None):
+            print(classification)
+            label = "HARD"
+        
         sql_generation = None
         if "EASY" in label:
             chain = LLMChain(llm=CHAT, prompt=easy_prompt)
@@ -1281,12 +1316,12 @@ if __name__ == "__main__":
             columns_descriptions=columns_descriptions,
             hint=hint,
             sql_query=sql_query)
-        finall_sql = extract_revised_sql_query(correction)
+        finall_sql = extract_sql_query(correction)
         if finall_sql is not None:
-            one_liner_sql_query = finall_sql.replace('\n', '').replace('\r', '')
+            one_liner_sql_query = finall_sql.replace('\n', ' ').replace('\r', ' ') # Fixing some sql
         else:
             if sql_query is not None:
-                one_liner_sql_query = sql_query.replace('\n', '').replace('\r', '')
+                one_liner_sql_query = sql_query.replace('\n', ' ').replace('\r', ' ')
             else:
                 one_liner_sql_query = "SELECT * FROM table" # no query generated, placeholder to avoid errors # noqa: E501
         new_row_df = pd.DataFrame(
@@ -1298,3 +1333,4 @@ if __name__ == "__main__":
         print("final sql query: ", one_liner_sql_query)
         print("Gold sql query: ", row["SQL"])
         print("--------------------------------------------------")   
+        time.sleep(60)
